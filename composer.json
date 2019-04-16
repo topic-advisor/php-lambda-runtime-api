@@ -1,0 +1,23 @@
+{
+    "name": "topic-advisor/php-lambda-runtime-api",
+    "description": "A PHP library to wrap the AWS Lambda runtime API",
+    "type": "library",
+    "license": "AGPL-3.0-or-later",
+    "require": {
+        "php": "^7.1.3",
+        "ext-curl": "*",
+        "guzzlehttp/guzzle": "^6.3",
+        "guzzlehttp/psr7": "^1.5"
+    },
+    "config": {
+        "preferred-install": {
+            "*": "dist"
+        },
+        "sort-packages": true
+    },
+    "autoload": {
+        "psr-4": {
+            "TopicAdvisor\\Lambda\\RuntimeApi\\": "src/Lambda/RuntimeApi/"
+        }
+    }
+}
