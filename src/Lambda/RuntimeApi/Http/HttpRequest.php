@@ -39,7 +39,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getMethod()
     {
-        return $this->payload['httpMethod'] ?? null;
+        return strtoupper($this->payload['httpMethod']) ?? null;
     }
 
     /**
@@ -146,8 +146,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getServerParams()
     {
-        return [];
-        // TODO: Implement getServerParams() method.
+        return $_ENV;
     }
 
     /**
@@ -162,8 +161,13 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getCookieParams()
     {
-        return [];
-        // TODO: Implement getCookieParams() method.
+        $cookies = [];
+        foreach (explode(';', $this->getHeader('cookie')) as $cookieString) {
+            list($name, $value) = explode('=', trim($cookieString));
+            $cookies[$name] = $value;
+        }
+
+        return $cookies;
     }
 
     /**
@@ -201,8 +205,22 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getParsedBody()
     {
+        if ($body = (string) $this->getBody()) {
+            switch ($this->getHeader('content-type')) {
+                case 'application/x-www-form-urlencoded':
+                case 'multipart/form-data':
+                    if ($this->getMethod() == self::METHOD_POST) {
+                        parse_str($body, $query);
+                        return $query;
+                    }
+                    break;
+
+                case 'application/json':
+                    return json_decode($body, true);
+            }
+        }
+
         return [];
-        // TODO: Implement getParsedBody() method.
     }
 
     /**
