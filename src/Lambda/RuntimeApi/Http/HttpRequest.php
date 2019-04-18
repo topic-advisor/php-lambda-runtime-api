@@ -71,7 +71,17 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getHeaders(): array
     {
-        return $this->payload['multiValueHeaders'] ?? $this->payload['headers'] ?? [];
+        if (isset($this->payload['multiValueHeaders'])) {
+            return $this->payload['multiValueHeaders'];
+        } elseif (isset($this->payload['headers'])) {
+            $headers = $this->payload['headers'];
+            foreach ($headers as &$header) {
+                $header = [$header];
+            }
+            return $headers;
+        } else {
+            return [];
+        }
     }
 
     /**
@@ -80,8 +90,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getHeader($name)
     {
-        $header = $this->getHeaders()[$name] ?? $this->getHeaders()[strtolower($name)] ?? [];
-        return is_array($header) ? $header : [$header];
+        return $this->getHeaders()[$name] ?? $this->getHeaders()[strtolower($name)] ?? [];
     }
 
     /**
@@ -162,7 +171,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     public function getCookieParams()
     {
         $cookies = [];
-        foreach (explode(';', $this->getHeader('cookie')) as $cookieString) {
+        foreach (explode(';', $this->getHeader('cookie')[0] ?? '') as $cookieString) {
             list($name, $value) = explode('=', trim($cookieString));
             $cookies[$name] = $value;
         }

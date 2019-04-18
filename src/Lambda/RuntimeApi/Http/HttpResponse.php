@@ -45,8 +45,17 @@ class HttpResponse extends InvocationResponse implements HttpResponseInterface
      */
     public function setHeaders(array $headers)
     {
-        $this->payload['headers'] = $headers;
-        $this->payload['multiValueHeaders'] = $headers;
+        $this->payload['multiValueHeaders'] = [];
+        $this->payload['headers'] = [];
+        foreach ($headers as $name => $value) {
+            if (is_array($value)) {
+                $this->payload['multiValueHeaders'][$name] = $value;
+                $this->payload['headers'][$name] = $value[0] ?? '';
+            } else {
+                $this->payload['multiValueHeaders'][$name] = [$value];
+                $this->payload['headers'][$name] = $value;
+            }
+        }
     }
 
     /**
