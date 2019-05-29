@@ -7,9 +7,9 @@ use Psr\Log\LoggerInterface;
 use TopicAdvisor\Lambda\RuntimeApi\InvocationRequestFactory;
 use TopicAdvisor\Lambda\RuntimeApi\InvocationRequestInterface;
 use TopicAdvisor\Lambda\RuntimeApi\InvocationResponseInterface;
-use TopicAdvisor\Lambda\RuntimeApi\RequestResponseClientInterface;
+use TopicAdvisor\Lambda\RuntimeApi\InvocationClientInterface;
 
-class RuntimeApiClient implements RequestResponseClientInterface
+class RuntimeApiClient implements InvocationClientInterface
 {
     /** @var InvocationRequestFactory */
     private $requestFactory;
@@ -17,22 +17,18 @@ class RuntimeApiClient implements RequestResponseClientInterface
     /** @var Client */
     private $httpClient;
 
-    /** @var LoggerInterface */
-    private $logger;
-
     /**
      * RuntimeApiClient constructor.
      * @param InvocationRequestFactory $requestFactory
      * @param LoggerInterface|null $logger
      */
-    public function __construct(InvocationRequestFactory $requestFactory, LoggerInterface $logger = null)
+    public function __construct(InvocationRequestFactory $requestFactory)
     {
         $this->requestFactory = $requestFactory;
         $this->httpClient = new Client([
             'base_uri' => getenv('AWS_LAMBDA_RUNTIME_API'),
             'timeout' => 0,
         ]);
-        $this->logger = $logger;
     }
 
     /**
@@ -61,30 +57,17 @@ class RuntimeApiClient implements RequestResponseClientInterface
     /**
      * @param \Throwable $exception
      * @param InvocationRequestInterface|null $request
-     * @return void
+     * @return bool
      */
-    public function handleFailure(\Throwable $exception, InvocationRequestInterface $request = null)
+    public function handleFailure(\Throwable $exception, InvocationRequestInterface $request = null): bool
     {
-        // Log error
-        if ($this->logger) {
-            $this->logger->error($exception->getMessage(), $exception->getTrace());
-        }
-
         if ($request) {
-            try {
-                $this->httpClient->post("/2018-06-01/runtime/invocation/{$request->getInvocationId()}/error", [
-                    'json' => ['error' => $exception->getMessage()],
-                ]);
-            } catch (\Throwable $exception) {
-                if ($this->logger) {
-                    $this->logger->error(
-                        sprintf("Unable to respond to error endpoint. (%s)"), $exception->getMessage(),
-                        $exception->getTrace()
-                    );
-                }
-            }
+            $this->httpClient->post("/2018-06-01/runtime/invocation/{$request->getInvocationId()}/error", [
+                'json' => ['error' => $exception->getMessage()],
+            ]);
+            return true;
         }
 
-        exit(1);
+        return false;
     }
 }

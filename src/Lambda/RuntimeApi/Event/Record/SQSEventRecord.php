@@ -21,9 +21,9 @@ class SQSEventRecord extends EventRecord implements IdentifiableEventRecordInter
     }
 
     /**
-     * @return null|string
+     * @return null|mixed
      */
-    public function getBody(): ?string
+    public function getBody()
     {
         return $this->payload['body'] ?? null;
     }
