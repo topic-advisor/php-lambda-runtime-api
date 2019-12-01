@@ -57,16 +57,18 @@ class RuntimeApiLoop
 
     public function run()
     {
+        $stdout = fopen ("php://stdout","w+");
         do {
             $this->processRequest();
 
             gc_collect_cycles();
 
             $this->requestCount++;
-            echo "INFO: Request count: {$this->requestCount}; ";
-            echo "Max memory usage: " . (number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)) . "MB; ";
-            echo "Current memory: " . (number_format(memory_get_usage(true) / 1024 / 1024, 2)) . "MB; ";
-            echo "\n";
+
+            fwrite($stdout, "INFO: Request count: {$this->requestCount}; ");
+            fwrite($stdout, "Max memory usage: " . (number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)) . "MB; ");
+            fwrite($stdout, "Current memory: " . (number_format(memory_get_usage(true) / 1024 / 1024, 2)) . "MB; ");
+            fwrite($stdout, "\n");
         } while (true);
     }
 

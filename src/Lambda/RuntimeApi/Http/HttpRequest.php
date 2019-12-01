@@ -55,9 +55,10 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getRequestTarget()
     {
-        $scheme = $this->getHeader('x-original-proto')[0] ?? '';
-        $host = $this->getHeader('host')[0];
-        if ($port = $this->getHeader('x-original-port')[0] ?? '') {
+        $scheme = $this->getHeader('x-original-proto')[0] ?? $this->getHeader('X-Forwarded-Proto')[0] ?? '';
+        $host = $this->getHeader('Host')[0] ?? '';
+        $port = $this->getHeader('x-original-port')[0] ?? $this->getHeader('X-Forwarded-Port')[0] ?? '';
+        if ($port) {
             $host .= ':' . $port;
         }
         $path = $this->payload['path'] ?? '';
@@ -171,9 +172,12 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     public function getCookieParams()
     {
         $cookies = [];
-        foreach (explode(';', $this->getHeader('cookie')[0] ?? '') as $cookieString) {
-            list($name, $value) = explode('=', trim($cookieString));
-            $cookies[$name] = $value;
+        $cookieHeader = $this->getHeader('cookie')[0] ?? null;
+        if ($cookieHeader) {
+            foreach (explode(';', $cookieHeader) as $cookieString) {
+                list($name, $value) = explode('=', trim($cookieString));
+                $cookies[$name] = $value;
+            }
         }
 
         return $cookies;
