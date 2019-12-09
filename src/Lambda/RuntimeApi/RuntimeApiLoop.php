@@ -2,45 +2,46 @@
 
 namespace TopicAdvisor\Lambda\RuntimeApi;
 
-use GuzzleHttp\Client;
+use Psr\Log\LoggerInterface;
+use Psr\Log\LogLevel;
+use TopicAdvisor\Lambda\RuntimeApi\Client\RuntimeApiClient;
 use TopicAdvisor\Lambda\RuntimeApi\Exception\NoHandlerSpecifiedException;
 
 class RuntimeApiLoop
 {
+    const OPTION_LOGGER = 'logger';
+    const OPTION_CLIENT_CLASS = 'clientClass';
+
     /** @var array */
     private $options;
 
-    /**
-     * @var InvocationRequestHandlerInterface[]
-     */
+    /** @var InvocationRequestHandlerInterface[] */
     private $handlers;
 
-    /**
-     * @var Client
-     */
-    private $httpClient;
+    /** @var InvocationClientInterface */
+    private $invocationClient;
 
-    /**
-     * @var InvocationRequestFactory
-     */
-    private $requestFactory;
+    /** @var LoggerInterface */
+    private $logger;
 
-    /**
-     * @var int
-     */
+    /** @var int */
     private $requestCount;
+
+    /** @var float */
+    private $requestTime;
+
+    /** @var float */
+    private $lastMemoryMb;
 
     /**
      * @param array $options
+     * ['logger' => LoggerInterface, 'is_cli' => bool]
      */
     public function __construct(array $options = [])
     {
         $this->options = $options;
-        $this->httpClient = new Client([
-            'base_uri' => getenv('AWS_LAMBDA_RUNTIME_API'),
-            'timeout' => 0,
-        ]);
-        $this->requestFactory = new InvocationRequestFactory();
+        $this->invocationClient = $this->createInvocationClient();
+        $this->logger = $this->getOption(self::OPTION_LOGGER);
         $this->requestCount = 0;
     }
 
@@ -57,18 +58,20 @@ class RuntimeApiLoop
 
     public function run()
     {
-        $stdout = fopen ("php://stdout","w+");
         do {
             $this->processRequest();
 
             gc_collect_cycles();
 
-            $this->requestCount++;
-
-            fwrite($stdout, "INFO: Request count: {$this->requestCount}; ");
-            fwrite($stdout, "Max memory usage: " . (number_format(memory_get_peak_usage(true) / 1024 / 1024, 2)) . "MB; ");
-            fwrite($stdout, "Current memory: " . (number_format(memory_get_usage(true) / 1024 / 1024, 2)) . "MB; ");
-            fwrite($stdout, "\n");
+            $currentMemory = memory_get_usage(true) / 1024 / 1024;
+            $this->log(LogLevel::INFO, 'Request processed successfully', [
+                'requestCount' => ++$this->requestCount,
+                'requestTimeMs' => number_format($this->requestTime, 2),
+                'memoryMaxMB' => number_format(memory_get_peak_usage(true) / 1024 / 1024, 2),
+                'memoryCurrentMB' => number_format($currentMemory, 2),
+                'memoryLeakMb' => number_format($this->lastMemoryMb ? $currentMemory - $this->lastMemoryMb : 0, 2),
+            ]);
+            $this->lastMemoryMb = $currentMemory;
         } while (true);
     }
 
@@ -76,14 +79,15 @@ class RuntimeApiLoop
     {
         $request = null;
         try {
-            $request = $this->getNextRequest();
+            $request = $this->invocationClient->getNextRequest();
+            $startTime = microtime(true);
 
             $handled = false;
             foreach ($this->handlers as $handler) {
                 if ($handler->canHandle($request)) {
                     $handler->preHandle($request);
                     $response = $handler->handle($request);
-                    $this->sendResponse($response);
+                    $this->invocationClient->sendResponse($response);
                     $handler->postHandle($request, $response);
                     $handled = true;
                     break;
@@ -93,54 +97,54 @@ class RuntimeApiLoop
             if (!$handled) {
                 throw new NoHandlerSpecifiedException($request);
             }
+
+            $this->requestTime = (microtime(true) - $startTime) * 1000;
         } catch (\Throwable $e) {
             $this->fail($e, $request);
         }
     }
 
     /**
-     * @return InvocationRequestInterface
-     */
-    private function getNextRequest(): InvocationRequestInterface
-    {
-        $invocation = $this->httpClient->get('/2018-06-01/runtime/invocation/next');
-        $invocationId = $invocation->getHeader('Lambda-Runtime-Aws-Request-Id')[0];
-        $payload = json_decode((string) $invocation->getBody(), true);
-
-        return $this->requestFactory->getRequest($invocationId, $payload);
-    }
-
-    /**
-     * @param InvocationResponseInterface $response
-     */
-    private function sendResponse(InvocationResponseInterface $response)
-    {
-        $this->httpClient->post("/2018-06-01/runtime/invocation/{$response->getInvocationId()}/response", [
-            'json' => $response->getPayload()
-        ]);
-    }
-
-    /**
-     * @param InvocationRequestInterface $request
      * @param \Throwable $exception
+     * @param InvocationRequestInterface|null $request
+     * @throws \Throwable
      */
     private function fail(\Throwable $exception, InvocationRequestInterface $request = null)
     {
-        // Log error
-        echo "ERROR: {$exception->getMessage()}\n";
-        echo "{$exception->getTraceAsString()}\n";
-
-        if ($request) {
-            try {
-                $this->httpClient->post("/2018-06-01/runtime/invocation/{$request->getInvocationId()}/error", [
-                    'json' => ['error' => $exception->getMessage()],
-                ]);
-            } catch (\Throwable $exception) {
-                echo "ERROR: Unable to respond to error endpoint. ({$exception->getMessage()})\n";
-                echo "{$exception->getTraceAsString()}\n";
-            }
+        $this->log(LogLevel::ERROR, $exception->getMessage(), $exception->getTrace());
+        if (!$this->invocationClient->handleFailure($exception, $request)) {
+            throw $exception;
         }
+    }
 
-        exit(1);
+    /**
+     * @return InvocationClientInterface
+     */
+    private function createInvocationClient(): InvocationClientInterface
+    {
+        $clientClass = $this->getOption(self::OPTION_CLIENT_CLASS, RuntimeApiClient::class);
+        return new $clientClass(new InvocationRequestFactory(), $this->logger);
+    }
+
+    /**
+     * @param string $optionName
+     * @param mixed|null $default
+     * @return mixed|null
+     */
+    private function getOption(string $optionName, $default = null)
+    {
+        return $this->options[$optionName] ?? $default;
+    }
+
+    /**
+     * @param string $level
+     * @param string $message
+     * @param array $context
+     */
+    private function log(string $level, string $message, array $context = [])
+    {
+        if ($this->logger) {
+            $this->logger->log($level, $message, $context);
+        }
     }
 }

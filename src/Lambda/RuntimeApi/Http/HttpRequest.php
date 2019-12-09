@@ -2,6 +2,7 @@
 
 namespace TopicAdvisor\Lambda\RuntimeApi\Http;
 
+use Symfony\Component\HttpFoundation\Cookie;
 use function GuzzleHttp\Psr7\build_query;
 use GuzzleHttp\Psr7\Uri;
 use Psr\Http\Message\StreamInterface;
@@ -17,6 +18,12 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     const METHOD_PATCH = 'PATCH';
     const METHOD_DELETE = 'DELETE';
     const METHOD_OPTIONS = 'OPTIONS';
+
+    /** @var array|null */
+    private $queryParams = null;
+
+    /** @var string|null */
+    private $queryString = null;
 
     /**
      * @return array
@@ -55,14 +62,14 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getRequestTarget()
     {
-        $scheme = $this->getHeader('x-original-proto')[0] ?? $this->getHeader('X-Forwarded-Proto')[0] ?? '';
+        $scheme = $this->getHeader('X-Original-Proto')[0] ?? $this->getHeader('X-Forwarded-Proto')[0] ?? '';
         $host = $this->getHeader('Host')[0] ?? '';
-        $port = $this->getHeader('x-original-port')[0] ?? $this->getHeader('X-Forwarded-Port')[0] ?? '';
+        $port = $this->getHeader('X-Original-Port')[0] ?? $this->getHeader('X-Forwarded-Port')[0] ?? '';
         if ($port) {
             $host .= ':' . $port;
         }
         $path = $this->payload['path'] ?? '';
-        $query = build_query($this->getQueryParams());
+        $query = $this->getQueryString();
 
         return Uri::composeComponents($scheme, $host, $path, $query, '');
     }
@@ -117,7 +124,11 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getQueryParams(): array
     {
-        return $this->payload['multiValueQueryStringParameters'] ?? $this->payload['queryStringParameters'] ?? [];
+        if (is_null($this->queryParams)) {
+           parse_str($this->getQueryString(), $this->queryParams);
+        }
+
+        return $this->queryParams;
     }
 
     /**
@@ -156,7 +167,14 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
      */
     public function getServerParams()
     {
-        return $_ENV;
+        $serverParams = $_ENV;
+        $forwardedIps = explode(',', $this->getHeader('X-Forwarded-For')[0] ?? null);
+        if ($forwardedIps) {
+            $serverParams['TRUSTED_PROXIES'] = $forwardedIps[0];
+            $serverParams['REMOTE_ADDR'] = $forwardedIps[0];
+        }
+
+        return $serverParams;
     }
 
     /**
@@ -172,7 +190,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     public function getCookieParams()
     {
         $cookies = [];
-        $cookieHeader = $this->getHeader('cookie')[0] ?? null;
+        $cookieHeader = $this->getHeader('Cookie')[0] ?? null;
         if ($cookieHeader) {
             foreach (explode(';', $cookieHeader) as $cookieString) {
                 list($name, $value) = explode('=', trim($cookieString));
@@ -219,7 +237,7 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     public function getParsedBody()
     {
         if ($body = (string) $this->getBody()) {
-            switch ($this->getHeader('content-type')) {
+            switch ($this->getHeader('Content-Type')) {
                 case 'application/x-www-form-urlencoded':
                 case 'multipart/form-data':
                     if ($this->getMethod() == self::METHOD_POST) {
@@ -413,5 +431,26 @@ class HttpRequest extends InvocationRequest implements HttpRequestInterface
     public function withoutAttribute($name)
     {
         // TODO: Implement withoutAttribute() method.
+    }
+
+    private function getQueryString(): string
+    {
+        if (is_null($this->queryString)) {
+            $params = $this->payload['multiValueQueryStringParameters'] ?? $this->payload['queryStringParameters'] ?? [];
+            $combined = '';
+            foreach ($params as $name => $value) {
+                if (is_array($value)) {
+                    foreach ($value as $val) {
+                        $combined .= $name . '=' . rawurlencode($val) .'&';
+                    }
+                } else {
+                    $combined .= $name . '=' . rawurlencode($value) .'&';
+                }
+            }
+
+            $this->queryString = trim($combined, '&');
+        }
+
+        return $this->queryString;
     }
 }
