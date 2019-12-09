@@ -85,7 +85,10 @@ class ApplicationHandler implements InvocationRequestHandlerInterface
 
 require __DIR__ . '/vendor/autoload.php';
 
-$loop = new TopicAdvisor\Lambda\RuntimeApi\RuntimeApiLoop();
+use TopicAdvisor\Lambda\RuntimeApi\RuntimeApiLoop;
+
+
+$loop = new RuntimeApiLoop();
 $loop
     ->setHandlers([
         new App\ApplicationHandler(),
@@ -93,10 +96,94 @@ $loop
     ->run();
 ```
 
-# PHP Configuration
+# Local Development
 
-You can include a PHP configuration by providing a `php.ini` file in the root of your project and changing the
-shebang line in `bootstrap` to:
+It is possible to develop locally against real Lambda requests.
+This is done in the CLI iva an interactive client.
+
+To run a local process loop:
+ 
+1: Modify your `bootstrap.php` to use the Cli Client class for handling requests & responses:
+
+```php
+#!/opt/bin/php
+<?php
+
+require __DIR__ . '/vendor/autoload.php';
+
+use Symfony\Component\Dotenv\Dotenv;
+use TopicAdvisor\Lambda\RuntimeApi\Client\CliClient;
+use TopicAdvisor\Lambda\RuntimeApi\RuntimeApiLoop;
+
+$options = [];
+if (getenv('APP_LOCAL')) {
+    if (!class_exists(Dotenv::class)) {
+        throw new \RuntimeException('APP_ENV environment variable is not defined. You need to define environment variables for configuration or add "symfony/dotenv" as a Composer dependency to load variables from a .env file.');
+    }
+    (new Dotenv())->load(__DIR__.'/.env');
+    $options[RuntimeApiLoop::OPTION_CLIENT_CLASS] = CliClient::class;
+}
+
+$loop = new TopicAdvisor\Lambda\RuntimeApi\RuntimeApiLoop($options);
+$loop
+    ->setHandlers([
+        new App\ApplicationHandler(),
+    ])
+    ->run();
 ```
-#!/opt/bin/php -cphp.ini
+
+2: Execute the bootstrap file from the command line:
+
+```
+ $ APP_LOCAL=1 php bootstrap.php
+```
+
+3: At the prompt, enter a JSON-encoded Lambda request object, and hit enter twice
+
+Note: requests can span multiple lines. The CLI Client will wait until it detects 2 empty lines.
+
+```
+Please enter a request:
+
+{
+  "body": "...",
+  "resource": "/{proxy+}",
+  "path": "/",
+  "httpMethod": "GET",
+  "isBase64Encoded": true,
+  "queryStringParameters": {
+    ...
+  },
+  "multiValueQueryStringParameters": {
+    ...
+  },
+  "pathParameters": {
+    ...
+  },
+  "stageVariables": {},
+  "headers": {
+    ...
+  },
+  "multiValueHeaders": {
+    ...
+  },
+  "requestContext": {
+    ...
+  }
+}
+
+
+Response:
+
+{
+    "statusCode": 200,
+    "multiValueHeaders": {
+       ...
+    },
+    "headers": {
+        ...
+    },
+    "body": "..."
+}
+
 ```
