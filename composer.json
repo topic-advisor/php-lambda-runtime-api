@@ -8,7 +8,7 @@
         "ext-curl": "*",
         "guzzlehttp/guzzle": "^6.3",
         "guzzlehttp/psr7": "^1.5",
-        "monolog/monolog": "^1.24",
+        "monolog/monolog": "*",
         "psr/log": "^1.1"
     },
     "config": {
